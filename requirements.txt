@@ -1,6 +1,6 @@
-flask
+gradio
 torch
 transformers
 Pillow
 requests
-spotipy
+
