@@ -1,5 +1,8 @@
-Flask==3.1.1
-spotipy==2.25.1
-Pillow==11.3.0
-torch==2.2.2
-transformers==4.41.2
+-f https://download.pytorch.org/whl/cpu/torch_stable.html
+torch
+torchvision
+transformers
+Pillow
+spotipy
+Flask
+
