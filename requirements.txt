@@ -1,3 +1,5 @@
+Flask
+spotipy
+Pillow
 torch
 transformers
-Pillow
