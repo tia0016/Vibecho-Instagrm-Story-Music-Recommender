@@ -12,9 +12,11 @@ app.config['UPLOAD_FOLDER'] = 'static/uploads'
 # Ensure upload folder exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-# Load CLIP model and processor
-clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
-clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+import os
+
+# Spotify API credentials (read from environment variables now)
+client_id = os.getenv("SPOTIFY_CLIENT_ID")
+client_secret = os.getenv("SPOTIFY_CLIENT_SECRET")
 
 # Mood labels
 mood_labels = ["romantic", "city", "soft", "fun", "nostalgic", "calm", "dreamy", "sunset", "cottagecore"]
