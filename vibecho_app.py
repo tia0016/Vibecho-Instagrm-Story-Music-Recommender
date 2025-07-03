@@ -1,61 +1,89 @@
-import streamlit as st
+import os
+from flask import Flask, render_template, request, redirect, url_for
 from PIL import Image
-from transformers import BlipProcessor, BlipForConditionalGeneration
-from spotipy.oauth2 import SpotifyClientCredentials
-import spotipy
+import torch
+from transformers import CLIPProcessor, CLIPModel
+import requests
+import base64
 
-# ====== CONFIG ======
-SPOTIFY_CLIENT_ID = "20399cb14d53499ba9da18a835e5caad"
-SPOTIFY_CLIENT_SECRET = "08bdecdb688b42639a6882ce42290189"
+app = Flask(__name__)
+app.config['UPLOAD_FOLDER'] = 'static/uploads'
 
-# ====== LOAD MODELS ======
-@st.cache_resource
-def load_blip():
-    processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
-    model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
-    return processor, model
+# Ensure upload folder exists
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-processor, model = load_blip()
+# Load CLIP model and processor
+clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
 
-sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(
-    client_id=SPOTIFY_CLIENT_ID,
-    client_secret=SPOTIFY_CLIENT_SECRET
-))
+# Mood labels
+mood_labels = ["romantic", "city", "soft", "fun", "nostalgic", "calm", "dreamy", "sunset", "cottagecore"]
 
-# ====== FUNCTIONS ======
-def get_image_description(image):
-    inputs = processor(image, return_tensors="pt")
-    out = model.generate(**inputs)
-    description = processor.decode(out[0], skip_special_tokens=True)
-    return description
+# Spotify API credentials
+client_id = "bda350f22b3d4c5096d9833a256fb1d0"
+client_secret = "c7d90a6d33ae4253a4a90169eed624bd"
 
-def get_music_recommendations(query, limit=5):
-    results = sp.search(q=query, limit=limit, type="track")
-    songs = []
-    for track in results['tracks']['items']:
-        song_info = f"[{track['name']} - {track['artists'][0]['name']}]({track['external_urls']['spotify']})"
-        songs.append(song_info)
-    return songs
+# Function to get Spotify access token
+def get_spotify_token(client_id, client_secret):
+    auth_str = f"{client_id}:{client_secret}"
+    b64_auth_str = base64.b64encode(auth_str.encode()).decode()
 
-# ====== STREAMLIT UI ======
-st.title("🎵 Image → Caption → Music 🎵")
-st.write("Upload an image, see what it describes, and get Spotify music recommendations based on that description!")
+    headers = {
+        "Authorization": f"Basic {b64_auth_str}",
+        "Content-Type": "application/x-www-form-urlencoded"
+    }
+    data = {"grant_type": "client_credentials"}
 
-uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
+    response = requests.post("https://accounts.spotify.com/api/token", headers=headers, data=data)
+    return response.json()["access_token"]
 
-if uploaded_file is not None:
-    image = Image.open(uploaded_file).convert("RGB")
-    st.image(image, caption="Uploaded Image", use_column_width=True)
+# Function to get song suggestions
+def get_spotify_songs(query, token, limit=4):
+    headers = {"Authorization": f"Bearer {token}"}
+    params = {"q": query, "type": "track", "limit": limit}
+    response = requests.get("https://api.spotify.com/v1/search", headers=headers, params=params)
+    return response.json().get("tracks", {}).get("items", [])
 
-    with st.spinner("🔎 Analyzing image..."):
-        description = get_image_description(image)
+@app.route("/", methods=["GET", "POST"])
+def index():
+    if request.method == "POST":
+        file = request.files["image"]
+        if file:
+            image_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+            file.save(image_path)
 
-    st.subheader("🖼 Image Description")
-    st.write(description)
+            # Process image
+            image = Image.open(image_path).convert("RGB")
+            inputs = clip_processor(text=mood_labels, images=image, return_tensors="pt", padding=True)
 
-    with st.spinner("🎵 Fetching music recommendations..."):
-        songs = get_music_recommendations(description)
+            with torch.no_grad():
+                outputs = clip_model(**inputs)
+                logits_per_image = outputs.logits_per_image
+                probs = logits_per_image.softmax(dim=1)
 
-    st.subheader("🎶 Recommended Songs")
-    for idx, song in enumerate(songs, 1):
-        st.markdown(f"{idx}. {song}")
+            predicted_index = probs.argmax().item()
+            predicted_mood = mood_labels[predicted_index]
+
+            # Get Spotify token & songs
+            spotify_token = get_spotify_token(client_id, client_secret)
+            songs = get_spotify_songs(predicted_mood, spotify_token)
+
+            # Top and more songs
+            top_song = ""
+            more_songs = []
+
+            if songs:
+                top_song = f"{songs[0]['name']} – {songs[0]['artists'][0]['name']}"
+                for song in songs[1:4]:
+                    more_songs.append(f"{song['name']} – {song['artists'][0]['name']}")
+
+            return render_template("index.html",
+                                   image_url=url_for('static', filename=f"uploads/{file.filename}"),
+                                   caption=f"This image gives a {predicted_mood} vibe.",
+                                   top_song=top_song,
+                                   more_songs=more_songs)
+
+    return render_template("index.html")
+
+if __name__ == "__main__":
+    app.run(debug=True)
