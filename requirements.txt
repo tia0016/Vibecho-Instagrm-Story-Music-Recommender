@@ -1,9 +1,6 @@
--f https://download.pytorch.org/whl/cpu/torch_stable.html
+flask
 torch
-torchvision
 transformers
 Pillow
+requests
 spotipy
-Flask
-
-
